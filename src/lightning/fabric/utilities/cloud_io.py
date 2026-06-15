@@ -107,14 +107,15 @@ def _atomic_save(checkpoint: dict[str, Any], filepath: _PATH) -> None:
 
                 is_azure = isinstance(fs, AzureBlobFileSystem)
 
-            if _is_object_storage(fs) and not is_azure:
-                # Use fs.pipe() for S3/GCS where it triggers parallel multipart uploads,
-                # giving 4-5x throughput improvement for checkpoints >= 500 MB.
-                # Azure is excluded because adlfs stages blocks sequentially, making pipe() slower.
-                fs.pipe(urlpath, bytesbuffer.getvalue())
-            else:
-                with fs.open(urlpath, "wb") as f:
-                    f.write(bytesbuffer.getvalue())
+            with bytesbuffer.getbuffer().toreadonly() as payload:
+                if _is_object_storage(fs) and not is_azure:
+                    # Use fs.pipe() for S3/GCS where it triggers parallel multipart uploads,
+                    # giving 4-5x throughput improvement for checkpoints >= 500 MB.
+                    # Azure is excluded because adlfs stages blocks sequentially, making pipe() slower.
+                    fs.pipe(urlpath, payload)
+                else:
+                    with fs.open(urlpath, "wb") as f:
+                        f.write(payload)
     except PermissionError as e:
         if isinstance(e.__context__, OSError) and getattr(e.__context__, "errno", None) == errno.EXDEV:
             raise RuntimeError(
