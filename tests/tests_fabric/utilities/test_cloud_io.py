@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import io
 import os
 from unittest import mock
 
@@ -110,6 +111,38 @@ def test_atomic_save_uses_pipe_for_s3(tmp_path):
 
     mock_fs.pipe.assert_called_once()
     mock_fs.open.assert_not_called()
+
+
+def test_atomic_save_pipes_readonly_memoryview_for_gcs(tmp_path):
+    """Test that _atomic_save pipes a read-only memoryview (zero-copy) to fs.pipe() for GCS."""
+    checkpoint = {"key": torch.tensor([1, 2, 3])}
+    filepath = "gs://bucket/checkpoint.ckpt"
+
+    captured = {}
+
+    def capture_pipe(path, payload):
+        # The memoryview is released once _atomic_save exits its `with` block, so its
+        # properties must be inspected here, while it is still alive.
+        captured["is_memoryview"] = isinstance(payload, memoryview)
+        captured["readonly"] = payload.readonly
+        captured["data"] = bytes(payload)
+
+    mock_fs = mock.MagicMock()
+    mock_fs.__class__.__name__ = "GCSFileSystem"
+    mock_fs.pipe.side_effect = capture_pipe
+
+    with (
+        mock.patch("lightning.fabric.utilities.cloud_io._is_object_storage", return_value=True),
+        mock.patch("fsspec.core.url_to_fs", return_value=(mock_fs, "bucket/checkpoint.ckpt")),
+    ):
+        _atomic_save(checkpoint, filepath)
+
+    mock_fs.pipe.assert_called_once()
+    mock_fs.open.assert_not_called()
+    assert captured["is_memoryview"], "payload should be a memoryview to avoid copying the buffer"
+    assert captured["readonly"], "payload should be a read-only memoryview"
+    loaded = torch.load(io.BytesIO(captured["data"]), weights_only=True)
+    torch.testing.assert_close(loaded["key"], checkpoint["key"])
 
 
 def test_atomic_save_uses_write_for_azure(tmp_path):
