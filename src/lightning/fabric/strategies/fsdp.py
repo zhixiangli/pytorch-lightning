@@ -895,8 +895,16 @@ def _get_full_state_dict_context(
     from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
     from torch.distributed.fsdp.api import FullOptimStateDictConfig
 
-    state_dict_config = FullStateDictConfig(offload_to_cpu=True, rank0_only=rank0_only)
-    optim_state_dict_config = FullOptimStateDictConfig(offload_to_cpu=True, rank0_only=rank0_only)
+    # Offloading the consolidated state dict to CPU only makes sense when the shards live on an
+    # accelerator. When FSDP itself runs on CPU, ``offload_to_cpu=True`` triggers a use-after-free
+    # in torch's ``FlatParamHandle.to_cpu()``: the ``.to("cpu")`` there is a no-op for tensors
+    # already on CPU (no copy, unlike from CUDA), so the flat param and every orig-param view of it
+    # keep aliasing the padded unsharded storage that ``to_cpu()`` frees next, and the
+    # post-state-dict hook's ``.clone()`` then segfaults. The accelerator path is unchanged.
+    param = next(module.parameters(), None)
+    offload_to_cpu = param is None or param.device.type != "cpu"
+    state_dict_config = FullStateDictConfig(offload_to_cpu=offload_to_cpu, rank0_only=rank0_only)
+    optim_state_dict_config = FullOptimStateDictConfig(offload_to_cpu=offload_to_cpu, rank0_only=rank0_only)
     state_dict_type_context = FSDP.state_dict_type(
         module=module,
         state_dict_type=StateDictType.FULL_STATE_DICT,
