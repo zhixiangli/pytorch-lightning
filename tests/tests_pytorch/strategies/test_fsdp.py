@@ -21,6 +21,7 @@ from lightning.fabric.strategies.fsdp import _is_sharded_checkpoint
 from lightning.fabric.utilities.imports import _TORCH_GREATER_EQUAL_2_2, _TORCH_GREATER_EQUAL_2_3
 from lightning.fabric.utilities.load import _load_distributed_checkpoint
 from lightning.pytorch import Trainer
+from lightning.pytorch.accelerators.cpu import CPUAccelerator
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.demos.boring_classes import BoringModel
 from lightning.pytorch.plugins import HalfPrecision
@@ -194,12 +195,11 @@ def _assert_save_equality(trainer, ckpt_path, cls=TestFSDPModel):
             assert torch.equal(ddp_param, shard_param)
 
 
-def test_invalid_on_cpu(tmp_path, cuda_count_0):
-    """Test to ensure that we raise Misconfiguration for FSDP on CPU."""
-    with pytest.raises(ValueError, match="The strategy `fsdp` requires a GPU accelerator"):
-        trainer = Trainer(accelerator="cpu", default_root_dir=tmp_path, fast_dev_run=True, strategy="fsdp")
-        assert isinstance(trainer.strategy, FSDPStrategy)
-        trainer.strategy.setup_environment()
+def test_fsdp_on_cpu_allowed(tmp_path, cuda_count_0):
+    """FSDP on CPU is allowed (enables CPU-based FSDP checkpointing)."""
+    trainer = Trainer(accelerator="cpu", default_root_dir=tmp_path, fast_dev_run=True, strategy="fsdp")
+    assert isinstance(trainer.strategy, FSDPStrategy)
+    assert isinstance(trainer.accelerator, CPUAccelerator)
 
 
 def test_custom_mixed_precision():

@@ -563,8 +563,10 @@ def test_strategy_choice_ddp_cpu_slurm(cuda_count_0, strategy):
 
 
 def test_check_fsdp_strategy_and_fallback():
-    with pytest.raises(ValueError, match="The strategy `fsdp` requires a GPU accelerator"):
-        Trainer(accelerator="cpu", strategy="fsdp")
+    # FSDP on CPU is now allowed (enables CPU-based FSDP checkpoint benchmarking).
+    trainer = Trainer(accelerator="cpu", strategy="fsdp")
+    assert isinstance(trainer.strategy, FSDPStrategy)
+    assert isinstance(trainer.accelerator, CPUAccelerator)
 
     class FSDPStrategySubclass(FSDPStrategy):
         pass
@@ -572,7 +574,7 @@ def test_check_fsdp_strategy_and_fallback():
     class AcceleratorSubclass(CPUAccelerator):
         pass
 
-    # we allow subclasses of FSDPStrategy to be used with other accelerators
+    # subclasses of FSDPStrategy are also allowed with other accelerators
     Trainer(accelerator="cpu", strategy=FSDPStrategySubclass())
     Trainer(accelerator=AcceleratorSubclass(), strategy=FSDPStrategySubclass())
 
